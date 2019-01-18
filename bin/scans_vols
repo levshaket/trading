@@ -1,0 +1,43 @@
+#!/usr/bin/python3
+#scan_vols
+#usage: scan_vols onemin
+import requests, sys, time
+sys.path.append('/home/neo/bin'); import startle
+
+SESSION = requests.Session()
+TICK_INTERVAL = sys.argv[1]
+MIN_DIFFS = {'onemin':14,'fivemin':14,'thirtymin':14,'hour':14}
+SECONDS = {'onemin':60,'fivemin':300,'thirtymin':1800,'hour':3600}
+
+
+def coin_list(session):
+	bittrex_markets = session.get('https://bittrex.com/api/v1.1/public/getmarkets').json()
+	if bittrex_markets['success']:
+		bittrex_markets = bittrex_markets['result']
+	else:
+		print('Bittrex API request for traded markets not successful.')
+		sys.exit()
+		return [market['MarketCurrency'] for market in bittrex_markets if market['BaseCurrency'] is 'BTC' and market['IsActive']]
+
+def tick_latest(coin,tick_interval,session):
+	tick = session.get('https://bittrex.com/Api/v2.0/pub/market/GetLatestTick?marketName=BTC-{}&tickInterval={}'.format(coin,tick_interval)).json()
+	if tick['success']:
+		tick = tick['result']
+		return tick
+		
+def main():
+	COINS = coin_list(SESSION)
+	COIN_VOLUMES = {coin:('TIMESTAMP',1000,'CLOSING') for coin in COINS}
+	while True:
+		for COIN in COINS:
+			TICK_LATEST = tick_latest(COIN,TICK_INTERVAL,SESSION)
+			TLAST,VLAST,CLAST = TICK_LATEST['T'][-8:-3],TICK_LATEST['BV'],TICK_LATEST['C']
+			TPRV, VPRV, CPRV = COIN_VOLUMES[COIN]
+			VPRV = 1 if VPRV < 1 else VPRV
+			VDIFF = VLAST/VPRV
+			if VDIFF > MIN_DIFFS[TICK_INTERVAL]:
+				PFLD = CLAST/CPRV
+				MSG = '{}:{}, VDIFF:{.1f}, RAW:{.1f}/{.1f}, TIME:{}'.format(COIN,TICK_INTERVAL,VDIFF,VPRV,VLAST,TLAST)
+				startle('me',MSG)
+			COIN_VOLUMES[COIN] = (TLAST,VLAST,CLAST)
+		time.sleep(SECONDS[TICK_INTERVAL])

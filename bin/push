@@ -1,0 +1,70 @@
+#!/usr/bin/python3
+#phone2
+#usage: phone client coin operator target
+#usage example: phone me rise g 0.0006
+#requisite in python: keyring.set_password("twilio","basic","acct_phone/acct/token")
+#requisite in python: keyring.set_password("phone","me")
+
+#MODULES
+import sys, time, keyring, requests
+from twilio.rest import Client
+from twilio.twiml.voice_response import VoiceResponse
+
+#ARGUMENTS
+CLIENT, COIN, OPERATOR, TARGET = sys.argv[1:5]
+TARGET = float(TARGET)
+URL = 'https://bittrex.com/api/v1.1/public/getticker?market=btc-{}'.format(COIN)
+INTERVAL = 60
+
+#SESSION PARAMETERS
+SESSION = requests.Session()
+
+#TWILIO PARAMETERS
+ACCT_PHONE, ACCT_NO, ACCT_TOKEN = keyring.get_password('twilio','basic').split('/')
+CLIENT_PHONE = keyring.get_password('phone', CLIENT)
+TWILIO = Client(ACCT_NO, ACCT_TOKEN)
+SIGNS = {'l':'fallen below', 'g':'risen above'}
+SIGN = SIGNS[OPERATOR]
+
+#FUNCTIONS
+def sms_generator(hr,mn,sec, coin,last_price,target):
+	sms = 'time:{:02d}:{:02d}, {}:{}, target:{}'.format(hr,mn, coin, last_price,target)
+	return sms
+	
+#def voice_message_generator(last_price, sign, target):
+#	voice = VoiceResponse()
+#	voice.say('The last bitcoin price was {} USD. It has {} the #target of {}'.format(last_price, sign, target))
+#	voice.hangup()
+#	return str(voice)
+
+def phone_alert(provider, client_phone, acct_phone, text_msg, voice_msg):
+	sms = provider.api.account.messages.create(to=client_phone,from_=acct_phone,body=text_msg)
+	voice = provider.api.account.calls.create(to=client_phone,from_=acct_phone,url=voice_msg)
+	print('{0} alerted by SMS at {1}\n{0} alerted by phone call at {1}'.format(CLIENT,CLIENT_PHONE))
+	
+def market_price(session, url):
+	ticker = session.get(url).json()
+	last_price = float(ticker['result']['Last'])
+	return last_price
+
+#MAIN FUNCTION	
+def main():
+	SWITCH = 1
+	print('TIMESTAMP'.ljust(9), COIN.upper())
+	while True:
+		try:
+			YR,MO,DY,HR,MIN,SEC,WD,JD,DT = time.localtime()
+			LAST_PRICE = market_price(SESSION,URL)
+			print('{:02d}:{:02d}:{:02d}'.format(HR,MIN,SEC).ljust(9),'{} BTC'.format(LAST_PRICE))
+			if (SWITCH==1 and (LAST_PRICE <= TARGET and OPERATOR == 'l' or LAST_PRICE >= TARGET and OPERATOR == 'g')):
+				VOICE_MSG = 'https://demo.twilio.com/docs/voice.xml'#voice_message_generator(LAST_PRICE, SIGN, TARGET)
+				TXT_MSG = sms_generator(HR,MIN,SEC, COIN,LAST_PRICE, TARGET)
+				phone_alert(TWILIO, CLIENT_PHONE, ACCT_PHONE, TXT_MSG, VOICE_MSG)
+				SWITCH = 0
+				continue
+			time.sleep(INTERVAL)
+		except Exception:
+			time.sleep(INTERVAL)
+			continue
+
+main()

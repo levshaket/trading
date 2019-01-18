@@ -1,0 +1,28 @@
+#!/usr/bin/python3
+#Calculate pearson correlation of cryptocoin trick price to bitcoin tick price
+#Usage: corr hour
+import requests, sys
+import pandas as pd
+
+tick_interval = sys.argv[1]
+session = requests.Session()
+
+markets = session.get('https://bittrex.com/api/v1.1/public/getmarkets').json()
+if markets['success']: markets = markets['result'] 
+
+coins = [{'coin':item['MarketCurrency'],'coin-long':item['MarketCurrencyLong'],'coin-market':item['MarketName']} for item in markets if item['BaseCurrency'] == 'BTC' and item['IsActive']]
+
+coins.append({'coin':'BTC','coin-long':'Bitcoin','coin-market':'USDT-BTC'})
+
+
+coin_data = {coin['coin']:[tick['O'] for tick in session.get('https://bittrex.com/Api/v2.0/pub/market/GetTicks?marketName={}&tickInterval={}'.format(coin['coin-market'],tick_interval)).json()['result']] for coin in coins}
+
+minlen = min([len(value) for value in coin_data.values()])
+
+for coin in coin_data.keys():
+	coin_data[coin] = coin_data[coin][len(coin_data[coin])-minlen:]
+
+coin_df = pd.DataFrame(coin_data)
+
+corrs = {coin_df[coin].corr(coin_df['BTC']):coin for coin in coin_df.columns}
+for corr in sorted(corrs.keys(),reverse=True): print(corr,corrs[corr])

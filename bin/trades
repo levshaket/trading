@@ -1,0 +1,159 @@
+#! /usr/bin/python3
+
+# program : trades
+
+# e.g.  trades btc 1.2 [reload]
+
+# purpose : reports volume anomalies in real-time for active markets
+
+# e.g.
+
+#	TIMESTAMP     MARKET     MINUTES    VDIFF
+#	........////............
+#	15:49:00	  BTC-LTC    1			12
+#	15:49:00	  BTC-LTC    2			18
+#	15:49:00	  BTC-LTC    3			35.1
+#	15:49:00	  BTC-LTC    5			19.3
+#	15:49:00	  BTC-TRIG   1			10.1
+#	15:49:00	  BTC-TRIG   2			16.3
+#	15:49:00	  BTC-TRIG   3			12.1
+#	15:49:00	  BTC-TRIG   5			10.1
+#	................................../////////....................................................
+#	...............
+
+
+# modules
+import sys, os, time, signal
+from pathlib import Path
+import bittrex as bt
+import cutils as cu
+import phone
+from json import JSONDecodeError
+from requests.exceptions import ConnectionError
+
+
+# arguments
+
+program_name, base_currency, pthreshold = sys.argv[0:3]
+try:
+	load = sys.argv[3]
+except IndexError:
+	load = None
+
+
+# parameters
+threshold = {1:10,2:10,5:10,15:10,30:20,60:20,120:20,240:20,1440:20}
+pthreshold = float(pthreshold)
+tick_interval = 'onemin'
+seconds = {'onemin': 60}
+s = seconds[tick_interval]
+
+
+
+# setup
+
+print('initiating setup...')
+
+if load:
+	filename = 'th-{}-{}'.format(base_currency, tick_interval)
+	directory = os.path.join(str(Path.home()),'bittrex','trades')
+	th = cu.load(filename,directory)
+	markets = th.keys()
+else:
+	markets = bt.get_active_markets(base_currency)
+	th = {market: [] for market in markets}
+
+
+def program_termination_handler(signal, frame):
+	filename = 'th-{}-{}'.format(base_currency, tick_interval)
+	directory = os.path.join(str(Path.home()),'bittrex','trades')
+	print('saving tick histories object as {} to {}...'.format(filename, directory))
+	cu.save(th, filename, directory)
+	sys.exit()
+		
+sh = [signal.signal(sig, program_termination_handler) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGTSTP, signal.SIGHUP)]
+
+notify = {market:{period:True for period in threshold.keys()} for market in th.keys()}
+
+# functions
+
+def append_ticks(th, market, ticks):
+	tick_history = th[market]
+	try:
+		i = tick_history.index(ticks[1])
+		th[market] = tick_history[:i] + ticks[1:]
+	except (ValueError, IndexError):
+		th[market].extend(ticks)
+		
+		
+	
+
+
+# main
+def main():
+	
+
+	td = lambda t,s: s-t%s
+	
+	T = time.time(); print('updates will start at {}...'.format(time.strftime('%I:%M %p', time.localtime(T + s - T%s))), end ='\n\n')
+	
+	time.sleep(td(T,s))
+	
+	print('TIMESTAMP'.ljust(13),'MARKET'.ljust(10),'MINUTES'.ljust(10),'DELTA-V'.ljust(9),'DELTA-P'.ljust(9))
+	
+	running = True
+	
+	anomaly = False
+	
+	while True:
+
+		try:
+			for market in markets:
+				try:
+					market_history = bt.get_market_history(market)
+				except (JSONDecodeError, TypeError):
+					continue
+				try:
+					ticks = bt.generate_ticks(market_history,s)
+				except IndexError:
+					continue
+				append_ticks(th,market,ticks)
+
+
+			anomaly = bt.report_volume_anomalies(th, notify=notify, i=-1, threshold=threshold, pthreshold=pthreshold, show=True, beep=True, call=False, text=False, flag=anomaly)
+		
+			if not anomaly:
+			
+				print('.', end='')
+				
+			if not running:
+				txt_msg = '{} is back up. Bittrex API requests are up.'.format(program_name)
+				os.system('spd-say "{}"'.format(txt_msg))
+#				phone.text('me', txt_msg)
+				running = True
+			
+			time.sleep(td(time.time(),s))
+			
+		except ConnectionError:
+		
+			print('/',end='')
+			
+			if running:
+				txt_msg = '{} is down. It will re-try in 5 seconds.'.format(program_name)
+				os.system('spd-say "{}"'.format(txt_msg))
+#				phone.text('me', txt_msg)
+				running = False
+				
+			time.sleep(5)
+		
+		except Exception:
+#			phone.call('me')
+			txt_msg = '{} has halted unexpectedly.'.format(program_name)
+			os.system('spd-say "{}"'.format(txt_msg))
+#			phone.text('me',txt_msg)
+			print(market)
+			raise Exception
+			
+
+main()
+

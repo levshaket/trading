@@ -1,0 +1,107 @@
+#!/usr/bin/python3
+#phone
+#usage: phone client coin1 operator target coin2 operator target1 operator target2 coin3 operator target
+#usage example: phone me btc l 3400.0 qtum l 0.0020 g 0.0025 dmd g 0.030
+#requisite in python: keyring.set_password("twilio","basic","acct_phone/acct/token")
+#requisite in python: keyring.set_password("phone","me")
+
+#MODULES
+import sys, time, keyring, requests, re, operator, phone
+from twilio.rest import Client
+from twilio.twiml.voice_response import VoiceResponse
+
+#ARGUMENTS
+CLIENT = sys.argv[1]
+FP = '\.?[0-9]{1,10}\.?[0-9]{0,10}'
+RXP = re.compile(r'(\w{2,5})([lg])(%s)(?:([lg])(%s))?'%(FP,FP))
+PARSED_ARGS = re.findall(RXP,''.join(sys.argv[2:]))
+CONDITIONS = {arg[0]: arg[1:] for arg in PARSED_ARGS}
+COINS = sorted(CONDITIONS.keys())
+SWITCH = {coin:1 for coin in COINS}
+PREFERENCES = {coin:('bitstamp','usd') if coin is 'btc' else ('bittrex','btc') for coin in COINS}
+URL = {'bitstamp': 'https://www.bitstamp.net/api/v2/ticker/','bittrex':'https://bittrex.com/api/v1.1/public/getticker?market='}
+
+#PARAMETERS
+INTERVAL = 60
+
+#SESSION PARAMETERS
+SESSION = requests.Session()
+ADAPTER = requests.adapters.HTTPAdapter() #Permits sessions for up to ten domains and ten threads per domain
+SESSION.mount('https://',ADAPTER)	#Specifies that the persistent connections are to use https.
+
+#TWILIO PARAMETERS
+ACCT_PHONE, ACCT_NO, ACCT_TOKEN = keyring.get_password('twilio','basic').split('/')
+CLIENT_PHONE = keyring.get_password('phone', CLIENT)
+TWILIO = Client(ACCT_NO, ACCT_TOKEN)
+VOICE_MSG = 'https://demo.twilio.com/docs/voice.xml'
+SIGNS = {'l':'fallen below', 'g':'risen above'}
+
+
+#FUNCTIONS
+def phone_alert(provider, client_phone, acct_phone, text_msg, voice_msg):
+	sms = provider.api.account.messages.create(to=client_phone,from_=acct_phone,body=text_msg)
+	voice = provider.api.account.calls.create(to=client_phone,from_=acct_phone,url=voice_msg)
+	
+def sms_generator(hr,mn, coin,last_price,target1,target2):
+	return 'TIME:{:02d}:{:02d}, {}:{}, FLOOR:{}, CEIL:{}'.format(hr,mn, coin.upper(),last_price,min(float(target1),float(target2)),max(float(target1),float(target2))) if target1 and target2 else 'TIME:{:02d}:{:02d}, {}:{}, BOUND:{}'.format(hr,mn, coin.upper(),last_price,target1) if target1 and not target2 else None
+
+
+
+
+#	voice.say('The last {} price was {} {}. It has {} the target of {}'.format(coin, last_price, currency, sign, target))
+#	voice.hangup()
+#	return str(voice)
+
+def condition(sign,last_price,target):
+	return operator.lt(last_price,float(target)) if sign=='l' else operator.gt(last_price,float(target)) if sign=='g' else False if sign=='' else None
+	
+def voice_message_generator(coin, last_price, operator1, target1, operator2, target2):
+	operator, target = (operator1, target1) if condition(operator1, last_price, target1) else (operator2, target2) if condition(operator2, last_price, target2) else None
+	return 'The {} price has {} {}'.format(coin, SIGNS[operator], target)
+			
+def ticker_price(session, coin):
+	exchange,fiat = PREFERENCES[coin]
+	end_url = coin + fiat if exchange is 'bitstamp' else fiat + '-' + coin if exchange is 'bittrex' else None
+	ticker = session.get(URL[exchange]+ end_url).json()
+	return ticker['last'] if exchange is 'bitstamp' else ticker['result']['Last'] if exchange is 'bittrex' else None 
+			
+# MAIN FUNCTION
+def main():
+	PROGRAM_SWITCH = 1
+	print('TIMESTAMP'.ljust(14),end='')			#prints header line
+	for COIN in COINS:
+		print(COIN.upper().ljust(14),end='')
+	print('')
+	while True:
+		try:
+			YR,MO,DY,HR,MIN,SEC,WD,JD,DT = time.localtime()
+			print('{:02d}:{:02d}:{:02d}'.format(HR,MIN,SEC).ljust(14),end='')
+			for COIN in COINS:
+				OPERATOR1,TARGET1,OPERATOR2,TARGET2 = CONDITIONS[COIN]
+				LAST_PRICE = ticker_price(SESSION,COIN)
+				if SWITCH[COIN]==1 and (condition(OPERATOR1,LAST_PRICE,TARGET1) or condition(OPERATOR2,LAST_PRICE,TARGET2)):
+					print('*',end='')
+#					VOICE_MSG = voice_message_generator(COIN,LAST_PRICE,OPERATOR1,TARGET1,OPERATOR2,TARGET2)
+#					phone.say(VOICE_MSG)
+					phone.beep()
+#					TXT_MSG = sms_generator(HR,MIN, COIN,LAST_PRICE,TARGET1,TARGET2)
+					SWITCH[COIN] = 0
+				print('{}'.format(LAST_PRICE).ljust(14),end='')
+			print('')
+			time.sleep(60)
+			if PROGRAM_SWITCH == 0:
+				TXT_MSG = 'The program has been restored. Biitrex API requests are currently up.'
+				phone.say(TXT_MSG)
+#				phone.text('me', TXT_MSG)
+				PROGRAM_SWITCH = 1
+		except Exception:
+			if PROGRAM_SWITCH == 1:
+				TXT_MSG = 'The program has been interrupted. Biitrex API requests are currently down.'
+				phone.say(TXT_MSG)
+#				phone.text('me', TXT_MSG)
+				PROGRAM_SWITCH = 0
+				time.sleep(60)
+				continue
+
+
+main()

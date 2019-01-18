@@ -1,0 +1,105 @@
+#! /usr/bin/python3
+
+#tick histories for active markets should have already been saved to bittrex/ticks
+
+import bittrex as bt
+
+#appends tick histories for active markets(onemin) prior to start of the program
+
+base_interval = 'onemin'; s = 60
+base_currency = 'btc'
+threshold = {1:10,2:10,3:10,5:10,15:10,30:20}
+
+
+
+
+#SUPPORT FUNCTION
+
+def report_volume_anomalies(tick_history, market):
+	
+try:
+		i = tick_history.index(new_ticks[0])
+		tick_history = tick_history[:i] + new_ticks
+	except IndexError:
+		tick_history = tick_history + new_ticks
+	anomalies = detect_volume_anomaly(tick_history,-1,threshold={1:10,2:10,3:10,5:10,15:10,30:20})
+	call,text = report_volume_anomaly(vds,)
+
+def report_volume_anomaly(market, vds,show=True,text=False,call=False):
+	ts, vds = vds
+	ts = time.strftime('%H:%M:%S',ts)
+	for n, vd in vds:
+		if vd:
+			anomaly = True
+			if show:
+				print(ts.ljust(13),market.ljust(10),n.ljust(10),vd.ljust(9))
+			if text:
+				txt_msg = ('TIME:{}, MARKET:{}, PERIOD:{}, VD:{}'.format(ts,market,n,vd))
+				phone.text('me',txt_msg)
+				text=False
+			if call:
+				phone.call('me')
+				call=False
+	return (text,call)
+
+# MAIN FUNCTION
+def main():
+	#appends tick histories for active markets prior to start of program
+	markets = bt.get_active_markets(base_currency)
+	th = bt.append_tick_histories(markets, base_interval)
+	#detects real-time volume anomalies for active markets
+	print('TIMESTAMP'.ljust(13),'MARKET'.ljust(10),'PERIOD'.ljust(10),'VDIFF'.ljust(9))#prints the header
+	switches = {market: 'False' for market in markets}
+	running = 1
+	while True:
+		T = time.time()
+		T = s - T%s
+		time.sleep(T)
+		try:
+			for market in markets:
+				bt.append_new_ticks(market,base_interval)
+			
+			if not running:
+				txt_msg = 'The running_update is restored. Bittrex API requests are up.'
+				phone.text('me', txt_msg)
+				running = 1
+		except ConnectionError:
+			print('/',end='')
+			time.sleep(5)
+			if running:
+				running = 0
+				txt_msg = 'The running_update is interrupted. Bittrex API requests are down.'
+				phone.text('me', TXT_MSG)
+		else:
+			print('.',end='')
+		except KeyboardInterrupt:
+			print('...saving updated tick histories')
+			for market in markets:
+				filename = '{}({})'.format(market,base_interval)
+				directory = str(Path.home())
+				python_object = th[base_interval][market]
+				bt.save(python_object,filename,directory)
+
+
+	
+'''
+TIMESTAMP     MARKET     PERIOD     VDIFF
+........////............
+15:49:00	  BTC-LTC    1			12
+15:49:00	  BTC-LTC    2			18
+15:49:00	  BTC-LTC    3			35.1
+15:49:00	  BTC-LTC    5			19.3
+15:49:00	  BTC-TRIG   1			10.1
+15:49:00	  BTC-TRIG   2			16.3
+15:49:00	  BTC-TRIG   3			12.1
+15:49:00	  BTC-TRIG   5			10.1
+................................../////////....................................................
+...............
+'''
+
+
+main()
+
+
+
+

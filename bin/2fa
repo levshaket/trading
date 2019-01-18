@@ -1,0 +1,60 @@
+#!/usr/bin/python3
+###DesktopAuth
+#Currently this program has defaults set for Google Authenticator
+#Duo and others to be added when time permits
+
+#Syntax: python DesktopAuth.py Authenticator Account
+#Authenticators: googl, duo, authy, etc
+#Accounts: bitstamp, coinbase, etc
+
+#modules ############################
+import time, sys, keyring, hmac, base64
+from hashlib import sha1
+from bitstring import BitArray
+
+#vars ############################
+AUTH = sys.argv[1]
+ACCT = sys.argv[2]
+#authenticator default values: T0,TI,D
+defaults = {'googl':(0,30,6)}
+#T0 designates the Unix time that the counter activated
+#TI designates the time interval on which the counter increments
+#D designates the length of the token to be produced by this program
+if AUTH in defaults:
+	T0,TI,D = defaults[AUTH]  
+else:
+	print("The authenticator {} is not presently supported by 2fa\nSupported authenticators to date include:\n\t'googl' = Google Authenticator".format(AUTH))
+	sys.exit()
+#The key K is stored securely on the Gnome-Keyring using python3 -m keyring auth acct passwd
+K = keyring.get_password(AUTH,ACCT)
+if not K:
+	print('The Gnome-Keyring does not contain a {0} account for {1}. Please add it manually by entering python3 -m keyring {1} {0} yourpassword in the command line.'.format(ACCT,AUTH))
+	sys.exit()
+K = base64.b32decode(K.upper())	#the key formatted in base 32 [RFC3548] is reformatted to 10-byte sequence
+
+#funcs #######################
+def counter():
+	t = time.time()	#the current time in seconds since the Unix epoch [1970-01-01 00:00:00]
+	n = int((t-T0)/TI) #the counter number since the Unix time designated by T0
+	tr = TI - (t-T0) % TI	#the time remaining in seconds until n increments
+	return (n,tr)
+
+def token_generator(n):
+	n = n.to_bytes(8,'big')	#the counter formatted in base 10 is reformatted to an 8-byte sequence
+	ho = hmac.new(K,n,sha1) #the key and counter are fed into the HMAC-SHA1 algorithm to produce a HMAC hash object
+	h = BitArray(ho.digest())	#the HMAC hash object is digested and the hash value is stored in a BitArray class
+	o = h[-4:].uint	#the offset value [0-15] is the decimal representation of the four least-significant bits
+	i = h[8*o+1: 8*o+32].uint	#the integer i is the decimal representation of the 31 bit-number starting at bit position 8*o+1
+	token = i % 10**D	#the token is the least significant D digits of i
+	return token
+	
+def main():
+	print('authenticator: {}\taccount: {}'.format(AUTH.upper(),ACCT.upper()))
+	while True:
+		N,TR = counter()
+		TOKEN = token_generator(N)
+		print('time remaining: {:.1f}s\ttoken: {:0{}d}'.format(TR,TOKEN,D))
+		time.sleep(TR)
+	
+main()
+
